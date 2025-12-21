@@ -3,7 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Parts Tracker Pro (AI Powered)</title>
+    <meta name="theme-color" content="#1a73e8">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <title>Parts Tracker Pro</title>
+    
+    <!-- PWA Manifest Link -->
+    <link rel="manifest" id="pwa-manifest">
+    
     <style>
         :root {
             --primary: #1a73e8;
@@ -175,7 +182,6 @@
             margin-right: 8px;
         }
 
-        /* Modal / Edit Overlay */
         .edit-overlay {
             position: fixed;
             top: 0; left: 0; right: 0; bottom: 0;
@@ -201,12 +207,11 @@
 
 <div class="app-container">
     <header>
-        <h1>Parts Tracker AI</h1>
+        <h1>Parts Tracker Pro</h1>
         <div class="project-badge" id="active-project-name">No Project Selected</div>
         <div class="stats-badge" id="total-parts-count">0 used / 0 total</div>
     </header>
 
-    <!-- Scanning Section -->
     <div class="section">
         <label>Current Page Number</label>
         <input type="number" id="page-number" placeholder="Enter Page #" value="1">
@@ -220,7 +225,6 @@
         <div id="status-msg">Ready to scan</div>
     </div>
 
-    <!-- Manual Entry Section -->
     <div class="section">
         <label>Manual Entry</label>
         <div style="display: flex; gap: 8px;">
@@ -229,10 +233,8 @@
         </div>
     </div>
 
-    <!-- Data Display -->
     <div id="display-area" class="results-container"></div>
 
-    <!-- Project & Actions -->
     <div class="section">
         <label>Switch Project</label>
         <select id="project-selector" onchange="handleSwitchProject()"></select>
@@ -246,7 +248,6 @@
     </div>
 </div>
 
-<!-- Edit Page Modal -->
 <div id="edit-overlay" class="edit-overlay">
     <div class="edit-modal">
         <h3 id="edit-modal-title" style="margin-top:0">Edit Page</h3>
@@ -260,11 +261,39 @@
 </div>
 
 <script>
+    // --- PWA SETUP ---
+    const manifest = {
+        "name": "Parts Tracker Pro",
+        "short_name": "PartsTrack",
+        "start_url": ".",
+        "display": "standalone",
+        "background_color": "#f1f3f4",
+        "theme_color": "#1a73e8",
+        "icons": [
+            {
+                "src": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA1MTIgNTEyIj48cmVjdCB3aWR0aD0iNTEyIiBoZWlnaHQ9IjUxMiIgZmlsbD0iIzFhNzNlOCIvPjx0ZXh0IHg9IjUwJSIgeT0iNTAlIiBmb250LXNpemU9IjI0MCIgZmlsbD0id2hpdGUiIGZvbnQtZmFtaWx5PSJzYW5zLXNlcmlmIiBkeT0iLjM1ZW0iIHRleHQtYW5jaG9yPSJtaWRkbGUiPlA8L3RleHQ+PC9zdmc+",
+                "sizes": "512x512",
+                "type": "image/svg+xml"
+            }
+        ]
+    };
+    const manifestBlob = new Blob([JSON.stringify(manifest)], {type: 'application/json'});
+    document.getElementById('pwa-manifest').setAttribute('href', URL.createObjectURL(manifestBlob));
+
+    // Simple Service Worker Registration
+    if ('serviceWorker' in navigator) {
+        const swCode = `
+            self.addEventListener('install', (e) => self.skipWaiting());
+            self.addEventListener('fetch', (e) => e.respondWith(fetch(e.request).catch(() => {})));
+        `;
+        const swBlob = new Blob([swCode], {type: 'application/javascript'});
+        navigator.serviceWorker.register(URL.createObjectURL(swBlob));
+    }
+
+    // --- APP LOGIC ---
     const apiKey = "AIzaSyAsZH6sDnGrZB2EPOALfQis7-toQziK7A8"; 
-    // Data structure: projects[activeProject][pageNum] = [{code: "A01", used: false}]
     let projects = JSON.parse(localStorage.getItem('part_scraper_projects_v2')) || { "Default Project": {} };
     let activeProject = localStorage.getItem('part_scraper_active') || "Default Project";
-    
     let currentEditingPage = null;
 
     const projectSelector = document.getElementById('project-selector');
@@ -275,7 +304,6 @@
     const scanBtn = document.getElementById('scan-button');
 
     function init() {
-        // Migration if old data format exists (simple string arrays)
         Object.keys(projects).forEach(proj => {
             Object.keys(projects[proj]).forEach(page => {
                 if (typeof projects[proj][page][0] === 'string') {
@@ -339,12 +367,12 @@
 
     async function callGeminiVision(base64Image) {
         const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
-        const systemPrompt = "You are a specialized part number extractor. Analyze the image and find all part codes. Part codes ALWAYS consist of exactly one letter followed by two digits (e.g., A05, C10, F22). Return ONLY a JSON array of strings.";
+        const systemPrompt = "Extract part codes (Letter + 2 digits). Return ONLY a JSON array of strings.";
         
         const payload = {
             contents: [{
                 parts: [
-                    { text: "Extract all letter-digit-digit codes." },
+                    { text: "List the codes." },
                     { inlineData: { mimeType: "image/jpeg", data: base64Image } }
                 ]
             }],
@@ -354,8 +382,7 @@
 
         const response = await fetch(url, { method: 'POST', body: JSON.stringify(payload) });
         const result = await response.json();
-        const text = result.candidates?.[0]?.content?.parts?.[0]?.text;
-        return JSON.parse(text);
+        return JSON.parse(result.candidates?.[0]?.content?.parts?.[0]?.text);
     }
 
     function processImageAI() {
@@ -434,24 +461,13 @@
     function savePageEdit() {
         const text = document.getElementById('edit-textarea').value;
         const newCodes = text.split(/[\s,]+/).filter(c => /^[A-Z]\d{2}$/i.test(c));
-        
-        // Map back to object structure, preserving 'used' state if the code remains
         const oldState = {};
-        projects[activeProject][currentEditingPage].forEach(item => {
-            oldState[item.code] = item.used;
-        });
-
+        projects[activeProject][currentEditingPage].forEach(item => { oldState[item.code] = item.used; });
         const updatedList = [...new Set(newCodes.map(c => c.toUpperCase()))].map(code => ({
-            code,
-            used: oldState[code] || false
+            code, used: oldState[code] || false
         })).sort((a,b) => a.code.localeCompare(b.code));
-
-        if (updatedList.length === 0) {
-            delete projects[activeProject][currentEditingPage];
-        } else {
-            projects[activeProject][currentEditingPage] = updatedList;
-        }
-
+        if (updatedList.length === 0) delete projects[activeProject][currentEditingPage];
+        else projects[activeProject][currentEditingPage] = updatedList;
         saveToStorage();
         renderData();
         closeEditModal();
@@ -461,37 +477,30 @@
         displayArea.innerHTML = "";
         const data = projects[activeProject] || {};
         const pages = Object.keys(data).sort((a, b) => Number(a) - Number(b));
-
         if (pages.length === 0) {
             displayArea.innerHTML = '<div class="empty-state">No parts scanned yet.</div>';
             updateTotalCount();
             return;
         }
-
         pages.forEach(page => {
             const block = document.createElement('div');
             block.className = 'page-block';
-            
-            const title = document.createElement('div');
-            title.className = 'page-title';
-            title.innerHTML = `
-                <div>Page ${page} <span style="font-weight: normal; opacity: 0.6; font-size: 0.8rem;">(${data[page].length})</span></div>
-                <button class="btn-text" onclick="openEditModal('${page}')">Edit Page</button>
+            block.innerHTML = `
+                <div class="page-title">
+                    <div>Page ${page} <span style="font-weight: normal; opacity: 0.6; font-size: 0.8rem;">(${data[page].length})</span></div>
+                    <button class="btn-text" onclick="openEditModal('${page}')">Edit Page</button>
+                </div>
+                <div class="chip-container" id="chips-${page}"></div>
             `;
-            
-            const chips = document.createElement('div');
-            chips.className = 'chip-container';
+            displayArea.appendChild(block);
+            const container = document.getElementById(`chips-${page}`);
             data[page].forEach((item, index) => {
                 const chip = document.createElement('span');
                 chip.className = `part-chip ${item.used ? 'used' : ''}`;
                 chip.textContent = item.code;
                 chip.onclick = () => toggleUsed(page, index);
-                chips.appendChild(chip);
+                container.appendChild(chip);
             });
-
-            block.appendChild(title);
-            block.appendChild(chips);
-            displayArea.appendChild(block);
         });
         updateTotalCount();
     }
@@ -526,6 +535,5 @@
 
     window.onload = init;
 </script>
-
 </body>
 </html>
