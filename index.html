@@ -3,19 +3,20 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Parts Tracker Pro - Fixed</title>
+    <title>Parts Tracker Pro - Stable</title>
     <style>
         :root { --primary: #1a73e8; --bg: #f1f3f4; --danger: #d93025; }
         body { font-family: 'Segoe UI', sans-serif; background: var(--bg); padding: 10px; display: flex; flex-direction: column; align-items: center; }
         .app-container { width: 100%; max-width: 500px; background: white; border-radius: 16px; padding: 20px; box-shadow: 0 4px 20px rgba(0,0,0,0.08); box-sizing: border-box; }
         .section { background: #f8f9fa; border-radius: 12px; padding: 15px; margin-bottom: 15px; border: 1px solid #e0e0e0; }
         input, button { width: 100%; padding: 12px; margin-bottom: 10px; border-radius: 8px; border: 1px solid #dadce0; box-sizing: border-box; font-size: 1rem; }
-        button { background: var(--primary); color: white; font-weight: bold; border: none; cursor: pointer; }
+        button { background: var(--primary); color: white; font-weight: bold; border: none; cursor: pointer; transition: opacity 0.2s; }
+        button:active { opacity: 0.8; }
         .btn-clear { background: transparent; color: var(--danger); border: 1px solid var(--danger); margin-top: 20px; font-size: 0.8rem; padding: 8px; }
-        .part-chip { display: inline-block; background: #3c4043; color: white; padding: 8px 14px; border-radius: 20px; margin: 4px; font-family: monospace; cursor: pointer; }
+        .part-chip { display: inline-block; background: #3c4043; color: white; padding: 8px 14px; border-radius: 20px; margin: 4px; font-family: monospace; cursor: pointer; user-select: none; }
         .part-chip.used { background: #1e8e3e; text-decoration: line-through; opacity: 0.6; }
         #status-msg { text-align: center; color: #e67e22; font-weight: 500; margin: 10px 0; min-height: 1.2rem; }
-        .page-block { border: 1px solid #dadce0; border-radius: 8px; margin-bottom: 12px; background: white; padding: 10px; }
+        .page-block { border: 1px solid #dadce0; border-radius: 8px; margin-bottom: 12px; background: white; padding: 10px; width: 100%; box-sizing: border-box; }
     </style>
 </head>
 <body>
@@ -24,8 +25,8 @@
     <h2 style="text-align:center; color:var(--primary); margin-top:0;">Parts Tracker Pro</h2>
     
     <div class="section">
-        <label style="font-size:0.8rem; font-weight:bold;">1. API Key (Auto-Saved)</label>
-        <input type="password" id="api-key" placeholder="Paste Gemini Key Here">
+        <label style="font-size:0.8rem; font-weight:bold;">1. API Key (Auto-Saves Locally)</label>
+        <input type="password" id="api-key" placeholder="Paste Gemini API Key">
     </div>
 
     <div class="section">
@@ -37,79 +38,76 @@
     </div>
 
     <div id="display-area"></div>
-    <button class="btn-clear" onclick="clearAll()">Reset App</button>
+
+    <button class="btn-clear" onclick="clearAllData()">Reset App & Clear Key</button>
 </div>
 
 <script>
+    // 1. Load data and key from localStorage on startup
     let partsData = JSON.parse(localStorage.getItem('parts_tracker_v3')) || {};
-    
-    const apiKeyInput = document.getElementById('api-key');
-    apiKeyInput.value = localStorage.getItem('parts_tracker_api_key') || "";
-    apiKeyInput.addEventListener('input', () => {
-        localStorage.setItem('parts_tracker_api_key', apiKeyInput.value);
+    const savedKey = localStorage.getItem('parts_tracker_api_key');
+
+    if (savedKey) {
+        document.getElementById('api-key').value = savedKey;
+    }
+
+    // 2. Save key automatically as you type it
+    document.getElementById('api-key').addEventListener('input', (e) => {
+        localStorage.setItem('parts_tracker_api_key', e.target.value);
     });
 
     async function processImageAI() {
-        const apiKey = apiKeyInput.value;
+        const apiKey = document.getElementById('api-key').value;
         const fileInput = document.getElementById('camera-input');
         const pageNum = document.getElementById('page-number').value || "1";
-        const status = document.getElementById('status-msg');
         
-        if (!apiKey) return alert("Please enter your API key.");
-        if (!fileInput.files[0]) return alert("Please capture/select an image.");
+        if (!apiKey) return alert("Please paste your API key first!");
+        if (!fileInput.files[0]) return alert("Please select or take a photo.");
 
-        status.innerText = "⌛ AI is thinking...";
-        status.style.color = "#e67e22";
+        document.getElementById('status-msg').innerText = "⌛ AI Analyzing...";
         
         const reader = new FileReader();
         reader.onload = async (e) => {
+            const base64Data = e.target.result.split(',')[1];
+            
+            // FIXED: Using /v1/ endpoint and specific model alias for better compatibility
+            const url = `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+            
             try {
-                const base64Data = e.target.result.split(',')[1];
-                // UPDATED: Using /v1/ instead of /v1beta/ for better model compatibility
-                const url = `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
-                
                 const response = await fetch(url, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         contents: [{ parts: [
-                            { text: "List all alphanumeric part codes found in this image as a JSON array of strings. Example: ['A1', 'B2']. Return ONLY the array." },
+                            { text: "Identify all unique part ID codes in this image (e.g., A10, B22). Return ONLY a JSON array of strings: ['CODE1', 'CODE2']. No extra text." },
                             { inlineData: { mimeType: "image/jpeg", data: base64Data } }
                         ]}]
                     })
                 });
 
-                const data = await response.json();
+                const result = await response.json();
                 
-                if (data.error) {
-                    throw new Error(data.error.message || "API Error");
+                if (result.error) {
+                    throw new Error(result.error.message);
                 }
 
-                if (!data.candidates || !data.candidates[0].content) {
-                    throw new Error("No codes found in image.");
-                }
-
-                let textResult = data.candidates[0].content.parts[0].text;
-                const jsonMatch = textResult.match(/\[.*\]/s); 
-                if (!jsonMatch) throw new Error("Could not parse codes.");
+                // Extract and clean JSON response
+                let rawText = result.candidates[0].content.parts[0].text;
+                const codes = JSON.parse(rawText.match(/\[.*\]/s)[0]);
                 
-                const codes = JSON.parse(jsonMatch[0]);
-
                 if (!partsData[pageNum]) partsData[pageNum] = [];
                 codes.forEach(c => {
-                    if (!partsData[pageNum].find(i => i.code === c)) {
+                    if (!partsData[pageNum].find(item => item.code === c)) {
                         partsData[pageNum].push({ code: c, used: false });
                     }
                 });
 
                 localStorage.setItem('parts_tracker_v3', JSON.stringify(partsData));
                 renderData();
-                status.innerText = `✅ Success: ${codes.length} found`;
-                status.style.color = "#1e8e3e";
+                document.getElementById('status-msg').innerText = `✅ Found ${codes.length} codes!`;
             } catch (err) {
-                console.error("Full Error details:", err);
-                status.innerText = "❌ Error: " + err.message;
-                status.style.color = "#d93025";
+                console.error(err);
+                document.getElementById('status-msg').innerText = "❌ Error: " + err.message;
             }
         };
         reader.readAsDataURL(fileInput.files[0]);
@@ -118,13 +116,18 @@
     function renderData() {
         const area = document.getElementById('display-area');
         area.innerHTML = "";
-        const pages = Object.keys(partsData).sort((a,b) => a-b);
-        if (pages.length === 0) area.innerHTML = "<p style='text-align:center; color:grey;'>No scans yet.</p>";
         
+        const pages = Object.keys(partsData).sort((a,b) => a-b);
+        if (pages.length === 0) {
+            area.innerHTML = "<p style='text-align:center; color:#888;'>No parts scanned yet.</p>";
+            return;
+        }
+
         pages.forEach(page => {
             const block = document.createElement('div');
             block.className = 'page-block';
             block.innerHTML = `<strong>Page ${page}</strong><br>`;
+            
             partsData[page].forEach((item, index) => {
                 const chip = document.createElement('span');
                 chip.className = `part-chip ${item.used ? 'used' : ''}`;
@@ -140,10 +143,13 @@
         });
     }
 
-    function clearAll() {
-        if(confirm("Delete everything?")) {
+    function clearAllData() {
+        if (confirm("Reset everything? This will delete all parts and your saved API key.")) {
             localStorage.clear();
-            location.reload();
+            partsData = {};
+            document.getElementById('api-key').value = "";
+            renderData();
+            document.getElementById('status-msg').innerText = "All Data Cleared";
         }
     }
 
