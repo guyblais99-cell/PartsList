@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Parts Tracker Pro - Hosted</title>
+    <title>Parts Tracker Pro - Stable</title>
     <style>
         :root { --primary: #1a73e8; --bg: #f1f3f4; }
         body { font-family: 'Segoe UI', sans-serif; background: var(--bg); padding: 10px; display: flex; flex-direction: column; align-items: center; }
@@ -11,9 +11,10 @@
         .section { background: #f8f9fa; border-radius: 12px; padding: 15px; margin-bottom: 15px; border: 1px solid #e0e0e0; }
         input, button { width: 100%; padding: 12px; margin-bottom: 10px; border-radius: 8px; border: 1px solid #dadce0; box-sizing: border-box; font-size: 1rem; }
         button { background: var(--primary); color: white; font-weight: bold; border: none; cursor: pointer; }
-        .chip { display: inline-block; background: #3c4043; color: white; padding: 8px 14px; border-radius: 20px; margin: 4px; font-family: monospace; }
+        .part-chip { display: inline-block; background: #3c4043; color: white; padding: 8px 14px; border-radius: 20px; margin: 4px; font-family: monospace; cursor: pointer; }
+        .part-chip.used { background: #1e8e3e; text-decoration: line-through; opacity: 0.6; }
         #status-msg { text-align: center; color: #e67e22; font-weight: 500; margin: 10px 0; }
-        label { font-size: 0.8rem; font-weight: bold; color: #555; display: block; margin-bottom: 5px; }
+        .page-block { border: 1px solid #dadce0; border-radius: 8px; margin-bottom: 12px; background: white; padding: 10px; }
     </style>
 </head>
 <body>
@@ -22,37 +23,38 @@
     <h2 style="text-align:center; color:var(--primary);">Parts Tracker Pro</h2>
     
     <div class="section">
-        <label>1. API Security (Paste Key Once)</label>
-        <input type="password" id="api-key" placeholder="AIzaSy...">
-        <p style="font-size: 0.7rem; color: #666; margin: 0;">Your key is not saved to the server. Paste it each time you refresh.</p>
+        <label style="font-size:0.8rem; font-weight:bold;">1. API Key (From Google AI Studio)</label>
+        <input type="password" id="api-key" placeholder="Paste Key Here">
     </div>
 
     <div class="section">
-        <label>2. Scan Part Numbers</label>
+        <label style="font-size:0.8rem; font-weight:bold;">2. Scan Image</label>
         <input type="number" id="page-number" placeholder="Page #" value="1">
         <input type="file" id="camera-input" accept="image/*" capture="environment">
         <button onclick="processImageAI()">📷 AI Vision Scan</button>
-        <div id="status-msg">Ready to scan</div>
+        <div id="status-msg">Ready</div>
     </div>
 
     <div id="display-area"></div>
 </div>
 
 <script>
+    // Load existing data from phone storage
+    let partsData = JSON.parse(localStorage.getItem('parts_tracker_v3')) || {};
+
     async function processImageAI() {
         const apiKey = document.getElementById('api-key').value;
         const fileInput = document.getElementById('camera-input');
-        const statusMsg = document.getElementById('status-msg');
+        const pageNum = document.getElementById('page-number').value;
         
-        if (!apiKey) return alert("Please paste your Google API key in the top box first!");
-        if (!fileInput.files[0]) return alert("Please select or take an image.");
+        if (!apiKey) return alert("Paste your API key first!");
+        if (!fileInput.files[0]) return alert("Select an image.");
 
-        statusMsg.innerText = "⌛ AI Analyzing...";
+        document.getElementById('status-msg').innerText = "⌛ AI Analyzing...";
         
         const reader = new FileReader();
         reader.onload = async (e) => {
             const base64Data = e.target.result.split(',')[1];
-            // Calling Google directly using the key YOU provided in the box
             const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
             
             try {
@@ -61,32 +63,56 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         contents: [{ parts: [
-                            { text: "Extract part codes like A01, B02. Return ONLY a JSON array of strings." },
+                            { text: "List part codes like A01, B22. Return ONLY a JSON array of strings." },
                             { inlineData: { mimeType: "image/jpeg", data: base64Data } }
                         ]}]
                     })
                 });
 
                 const result = await response.json();
-                if (result.error) throw new Error(result.error.message);
-                
                 const codes = JSON.parse(result.candidates[0].content.parts[0].text);
-                statusMsg.innerText = `✅ Found ${codes.length} codes!`;
                 
-                const area = document.getElementById('display-area');
-                codes.forEach(code => {
-                    const chip = document.createElement('span');
-                    chip.className = 'chip';
-                    chip.innerText = code;
-                    area.appendChild(chip);
+                // Save to our data structure
+                if (!partsData[pageNum]) partsData[pageNum] = [];
+                codes.forEach(c => {
+                    if (!partsData[pageNum].find(item => item.code === c)) {
+                        partsData[pageNum].push({ code: c, used: false });
+                    }
                 });
+
+                localStorage.setItem('parts_tracker_v3', JSON.stringify(partsData));
+                renderData();
+                document.getElementById('status-msg').innerText = `✅ Found ${codes.length} codes!`;
             } catch (err) {
-                console.error(err);
-                statusMsg.innerText = "❌ Error: Key might be blocked or invalid.";
+                document.getElementById('status-msg').innerText = "❌ Scan Failed. Key might be blocked.";
             }
         };
         reader.readAsDataURL(fileInput.files[0]);
     }
+
+    function renderData() {
+        const area = document.getElementById('display-area');
+        area.innerHTML = "";
+        Object.keys(partsData).sort((a,b) => a-b).forEach(page => {
+            const block = document.createElement('div');
+            block.className = 'page-block';
+            block.innerHTML = `<strong>Page ${page}</strong><br>`;
+            partsData[page].forEach((item, index) => {
+                const chip = document.createElement('span');
+                chip.className = `part-chip ${item.used ? 'used' : ''}`;
+                chip.innerText = item.code;
+                chip.onclick = () => {
+                    partsData[page][index].used = !partsData[page][index].used;
+                    localStorage.setItem('parts_tracker_v3', JSON.stringify(partsData));
+                    renderData();
+                };
+                block.appendChild(chip);
+            });
+            area.appendChild(block);
+        });
+    }
+
+    window.onload = renderData;
 </script>
 </body>
 </html>
