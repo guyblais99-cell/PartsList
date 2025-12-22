@@ -4,11 +4,10 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="theme-color" content="#1a73e8">
-    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <title>Parts Tracker Pro</title>
     
-    <!-- PWA Manifest Link -->
     <link rel="manifest" id="pwa-manifest">
     
     <style>
@@ -262,36 +261,30 @@
 
 <script>
     // --- PWA SETUP ---
+    // Fix: Using actual file path to solve Protocol Error
+    if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+            navigator.serviceWorker.register('/sw.js').catch(() => {});
+        });
+    }
+
     const manifest = {
         "name": "Parts Tracker Pro",
         "short_name": "PartsTrack",
-        "start_url": ".",
+        "start_url": "/", // Valid root path
         "display": "standalone",
         "background_color": "#f1f3f4",
         "theme_color": "#1a73e8",
-        "icons": [
-            {
-                "src": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA1MTIgNTEyIj48cmVjdCB3aWR0aD0iNTEyIiBoZWlnaHQ9IjUxMiIgZmlsbD0iIzFhNzNlOCIvPjx0ZXh0IHg9IjUwJSIgeT0iNTAlIiBmb250LXNpemU9IjI0MCIgZmlsbD0id2hpdGUiIGZvbnQtZmFtaWx5PSJzYW5zLXNlcmlmIiBkeT0iLjM1ZW0iIHRleHQtYW5jaG9yPSJtaWRkbGUiPlA8L3RleHQ+PC9zdmc+",
-                "sizes": "512x512",
-                "type": "image/svg+xml"
-            }
-        ]
+        "icons": [{
+            "src": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA1MTIgNTEyIj48cmVjdCB3aWR0aD0iNTEyIiBoZWlnaHQ9IjUxMiIgZmlsbD0iIzFhNzNlOCIvPjx0ZXh0IHg9IjUwJSIgeT0iNTAlIiBmb250LXNpemU9IjI0MCIgZmlsbD0id2hpdGUiIGZvbnQtZmFtaWx5PSJzYW5zLXNlcmlmIiBkeT0iLjM1ZW0iIHRleHQtYW5jaG9yPSJtaWRkbGUiPlA8L3RleHQ+PC9zdmc+",
+            "sizes": "512x512",
+            "type": "image/svg+xml"
+        }]
     };
     const manifestBlob = new Blob([JSON.stringify(manifest)], {type: 'application/json'});
     document.getElementById('pwa-manifest').setAttribute('href', URL.createObjectURL(manifestBlob));
 
-    // Simple Service Worker Registration
-    if ('serviceWorker' in navigator) {
-        const swCode = `
-            self.addEventListener('install', (e) => self.skipWaiting());
-            self.addEventListener('fetch', (e) => e.respondWith(fetch(e.request).catch(() => {})));
-        `;
-        const swBlob = new Blob([swCode], {type: 'application/javascript'});
-        navigator.serviceWorker.register(URL.createObjectURL(swBlob));
-    }
-
     // --- APP LOGIC ---
-    const apiKey = "AIzaSyAsZH6sDnGrZB2EPOALfQis7-toQziK7A8"; 
     let projects = JSON.parse(localStorage.getItem('part_scraper_projects_v2')) || { "Default Project": {} };
     let activeProject = localStorage.getItem('part_scraper_active') || "Default Project";
     let currentEditingPage = null;
@@ -304,83 +297,23 @@
     const scanBtn = document.getElementById('scan-button');
 
     function init() {
-        Object.keys(projects).forEach(proj => {
-            Object.keys(projects[proj]).forEach(page => {
-                if (typeof projects[proj][page][0] === 'string') {
-                    projects[proj][page] = projects[proj][page].map(code => ({ code, used: false }));
-                }
-            });
-        });
-        
         if (!projects[activeProject]) activeProject = Object.keys(projects)[0] || "Default Project";
         updateProjectList();
         renderData();
     }
 
-    function saveToStorage() {
-        localStorage.setItem('part_scraper_projects_v2', JSON.stringify(projects));
-        localStorage.setItem('part_scraper_active', activeProject);
-        updateTotalCount();
-    }
-
-    function updateProjectList() {
-        projectSelector.innerHTML = "";
-        Object.keys(projects).forEach(name => {
-            const opt = document.createElement('option');
-            opt.value = name;
-            opt.textContent = name;
-            if (name === activeProject) opt.selected = true;
-            projectSelector.appendChild(opt);
-        });
-        activeProjectLabel.textContent = "Current: " + activeProject;
-    }
-
-    function updateTotalCount() {
-        const data = projects[activeProject] || {};
-        let total = 0;
-        let usedCount = 0;
-        Object.values(data).forEach(list => {
-            total += list.length;
-            usedCount += list.filter(item => item.used).length;
-        });
-        totalPartsLabel.textContent = `${usedCount} used / ${total} total`;
-    }
-
-    function createNewProject() {
-        const name = document.getElementById('new-project-input').value.trim();
-        if (!name) return;
-        if (projects[name]) return alert("Project already exists!");
-        projects[name] = {};
-        activeProject = name;
-        document.getElementById('new-project-input').value = "";
-        saveToStorage();
-        updateProjectList();
-        renderData();
-    }
-
-    function handleSwitchProject() {
-        activeProject = projectSelector.value;
-        saveToStorage();
-        activeProjectLabel.textContent = "Current: " + activeProject;
-        renderData();
-    }
-
     async function callGeminiVision(base64Image) {
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
-        const systemPrompt = "Extract part codes (Letter + 2 digits). Return ONLY a JSON array of strings.";
+        // SECURE: No API key here. Calls your Vercel Proxy
+        const response = await fetch('/api/scan', {
+            method: 'POST',
+            body: JSON.stringify({ image: base64Image })
+        });
         
-        const payload = {
-            contents: [{
-                parts: [
-                    { text: "List the codes." },
-                    { inlineData: { mimeType: "image/jpeg", data: base64Image } }
-                ]
-            }],
-            systemInstruction: { parts: [{ text: systemPrompt }] },
-            generationConfig: { responseMimeType: "application/json" }
-        };
-
-        const response = await fetch(url, { method: 'POST', body: JSON.stringify(payload) });
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || "Vision Scan failed");
+        }
+        
         const result = await response.json();
         return JSON.parse(result.candidates?.[0]?.content?.parts?.[0]?.text);
     }
@@ -405,7 +338,8 @@
                     statusMsg.textContent = "⚠️ No parts found.";
                 }
             } catch (err) {
-                statusMsg.textContent = "❌ Error analyzing image.";
+                console.error(err);
+                statusMsg.textContent = "❌ Scan Error: Check Vercel logs.";
             } finally {
                 scanBtn.disabled = false;
                 fileInput.value = "";
@@ -417,60 +351,41 @@
     function addCodesToPage(pageNum, codes) {
         if (!projects[activeProject][pageNum]) projects[activeProject][pageNum] = [];
         const existingCodes = new Set(projects[activeProject][pageNum].map(i => i.code));
-        
         codes.forEach(c => {
             const clean = c.toUpperCase().trim();
             if (/^[A-Z]\d{2}$/.test(clean) && !existingCodes.has(clean)) {
                 projects[activeProject][pageNum].push({ code: clean, used: false });
             }
         });
-        
-        projects[activeProject][pageNum].sort((a,b) => a.code.localeCompare(b.code));
         saveToStorage();
         renderData();
     }
 
-    function addManualCode() {
-        const input = document.getElementById('manual-code');
-        const code = input.value.trim().toUpperCase();
-        const pageNum = document.getElementById('page-number').value;
-        if (!code || !pageNum) return;
-        addCodesToPage(pageNum, [code]);
-        input.value = "";
+    function saveToStorage() {
+        localStorage.setItem('part_scraper_projects_v2', JSON.stringify(projects));
+        localStorage.setItem('part_scraper_active', activeProject);
+        updateTotalCount();
     }
 
-    function toggleUsed(page, index) {
-        projects[activeProject][page][index].used = !projects[activeProject][page][index].used;
-        saveToStorage();
-        renderData();
+    function updateProjectList() {
+        projectSelector.innerHTML = "";
+        Object.keys(projects).forEach(name => {
+            const opt = document.createElement('option');
+            opt.value = name; opt.textContent = name;
+            if (name === activeProject) opt.selected = true;
+            projectSelector.appendChild(opt);
+        });
+        activeProjectLabel.textContent = "Current: " + activeProject;
     }
 
-    function openEditModal(page) {
-        currentEditingPage = page;
-        const codes = projects[activeProject][page].map(i => i.code).join(', ');
-        document.getElementById('edit-modal-title').textContent = `Edit Page ${page}`;
-        document.getElementById('edit-textarea').value = codes;
-        document.getElementById('edit-overlay').style.display = 'flex';
-    }
-
-    function closeEditModal() {
-        document.getElementById('edit-overlay').style.display = 'none';
-        currentEditingPage = null;
-    }
-
-    function savePageEdit() {
-        const text = document.getElementById('edit-textarea').value;
-        const newCodes = text.split(/[\s,]+/).filter(c => /^[A-Z]\d{2}$/i.test(c));
-        const oldState = {};
-        projects[activeProject][currentEditingPage].forEach(item => { oldState[item.code] = item.used; });
-        const updatedList = [...new Set(newCodes.map(c => c.toUpperCase()))].map(code => ({
-            code, used: oldState[code] || false
-        })).sort((a,b) => a.code.localeCompare(b.code));
-        if (updatedList.length === 0) delete projects[activeProject][currentEditingPage];
-        else projects[activeProject][currentEditingPage] = updatedList;
-        saveToStorage();
-        renderData();
-        closeEditModal();
+    function updateTotalCount() {
+        const data = projects[activeProject] || {};
+        let total = 0, usedCount = 0;
+        Object.values(data).forEach(list => {
+            total += list.length;
+            usedCount += list.filter(item => item.used).length;
+        });
+        totalPartsLabel.textContent = `${usedCount} used / ${total} total`;
     }
 
     function renderData() {
@@ -485,54 +400,57 @@
         pages.forEach(page => {
             const block = document.createElement('div');
             block.className = 'page-block';
-            block.innerHTML = `
-                <div class="page-title">
+            block.innerHTML = `<div class="page-title">
                     <div>Page ${page} <span style="font-weight: normal; opacity: 0.6; font-size: 0.8rem;">(${data[page].length})</span></div>
                     <button class="btn-text" onclick="openEditModal('${page}')">Edit Page</button>
                 </div>
-                <div class="chip-container" id="chips-${page}"></div>
-            `;
+                <div class="chip-container" id="chips-${page}"></div>`;
             displayArea.appendChild(block);
-            const container = document.getElementById(`chips-${page}`);
             data[page].forEach((item, index) => {
                 const chip = document.createElement('span');
                 chip.className = `part-chip ${item.used ? 'used' : ''}`;
                 chip.textContent = item.code;
-                chip.onclick = () => toggleUsed(page, index);
-                container.appendChild(chip);
+                chip.onclick = () => { item.used = !item.used; saveToStorage(); renderData(); };
+                document.getElementById(`chips-${page}`).appendChild(chip);
             });
         });
         updateTotalCount();
     }
 
+    function createNewProject() {
+        const name = document.getElementById('new-project-input').value.trim();
+        if (!name || projects[name]) return;
+        projects[name] = {}; activeProject = name;
+        document.getElementById('new-project-input').value = "";
+        saveToStorage(); updateProjectList(); renderData();
+    }
+
+    function handleSwitchProject() { activeProject = projectSelector.value; saveToStorage(); renderData(); }
+    function openEditModal(page) {
+        currentEditingPage = page;
+        const codes = projects[activeProject][page].map(i => i.code).join(', ');
+        document.getElementById('edit-modal-title').textContent = `Edit Page ${page}`;
+        document.getElementById('edit-textarea').value = codes;
+        document.getElementById('edit-overlay').style.display = 'flex';
+    }
+    function closeEditModal() { document.getElementById('edit-overlay').style.display = 'none'; }
+    function savePageEdit() {
+        const text = document.getElementById('edit-textarea').value;
+        const newCodes = text.split(/[\s,]+/).filter(c => /^[A-Z]\d{2}$/i.test(c));
+        projects[activeProject][currentEditingPage] = [...new Set(newCodes.map(c => c.toUpperCase()))].map(code => ({ code, used: false }));
+        saveToStorage(); renderData(); closeEditModal();
+    }
+    function addManualCode() { const val = document.getElementById('manual-code').value; addCodesToPage(document.getElementById('page-number').value, [val]); }
     function exportData() {
         const data = projects[activeProject];
-        let csvContent = "data:text/csv;charset=utf-8,Page,PartNumber,Status\n";
-        Object.keys(data).sort((a,b) => a-b).forEach(page => {
-            data[page].forEach(item => { 
-                csvContent += `${page},${item.code},${item.used ? 'Used' : 'Unused'}\n`; 
-            });
-        });
-        const encodedUri = encodeURI(csvContent);
+        let csv = "Page,PartNumber,Status\n";
+        Object.keys(data).forEach(p => data[p].forEach(i => csv += `${p},${i.code},${i.used ? 'Used' : 'Unused'}\n`));
         const link = document.createElement("a");
-        link.setAttribute("href", encodedUri);
-        link.setAttribute("download", `${activeProject.replace(/\s+/g, '_')}_parts.csv`);
-        document.body.appendChild(link);
+        link.href = 'data:text/csv;charset=utf-8,' + encodeURI(csv);
+        link.download = `${activeProject}_parts.csv`;
         link.click();
-        document.body.removeChild(link);
     }
-
-    function deleteCurrentProject() {
-        if (confirm(`Delete entire project "${activeProject}"?`)) {
-            delete projects[activeProject];
-            if (Object.keys(projects).length === 0) projects["Default Project"] = {};
-            activeProject = Object.keys(projects)[0];
-            saveToStorage();
-            updateProjectList();
-            renderData();
-        }
-    }
-
+    function deleteCurrentProject() { if (confirm("Delete project?")) { delete projects[activeProject]; activeProject = Object.keys(projects)[0]; saveToStorage(); updateProjectList(); renderData(); } }
     window.onload = init;
 </script>
 </body>
