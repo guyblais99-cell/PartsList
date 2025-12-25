@@ -3,34 +3,36 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Parts Tracker - Model Fix</title>
+    <title>Parts Tracker - Model Fixed</title>
     <style>
-        :root { --primary: #1a73e8; --bg: #f1f3f4; }
+        :root { --primary: #1a73e8; --bg: #f1f3f4; --success: #1e8e3e; }
         body { font-family: 'Segoe UI', sans-serif; background: var(--bg); padding: 10px; display: flex; flex-direction: column; align-items: center; }
         .app-container { width: 100%; max-width: 500px; background: white; border-radius: 16px; padding: 20px; box-shadow: 0 4px 20px rgba(0,0,0,0.08); box-sizing: border-box; }
         .section { background: #f8f9fa; border-radius: 12px; padding: 15px; margin-bottom: 15px; border: 1px solid #e0e0e0; }
         input, button { width: 100%; padding: 12px; margin-bottom: 10px; border-radius: 8px; border: 1px solid #dadce0; box-sizing: border-box; font-size: 1rem; }
         button { background: var(--primary); color: white; font-weight: bold; border: none; cursor: pointer; }
-        #status-msg { text-align: center; color: #d93025; font-size: 0.9rem; margin: 10px 0; white-space: pre-wrap; }
-        .part-chip { display: inline-block; background: #3c4043; color: white; padding: 8px 14px; border-radius: 20px; margin: 4px; font-family: monospace; }
+        #status-msg { text-align: center; color: #e67e22; font-weight: 500; margin: 10px 0; min-height: 1.2rem; white-space: pre-wrap; }
+        .part-chip { display: inline-block; background: #3c4043; color: white; padding: 10px 16px; border-radius: 20px; margin: 5px; font-family: monospace; cursor: pointer; user-select: none; }
+        .part-chip.used { background: var(--success) !important; text-decoration: line-through; opacity: 0.8; }
+        .page-block { border: 1px solid #dadce0; border-radius: 8px; margin-bottom: 12px; background: white; padding: 10px; width:100%; box-sizing: border-box;}
     </style>
 </head>
 <body>
 
 <div class="app-container">
-    <h2 style="text-align:center; color:var(--primary);">Parts Tracker Pro</h2>
+    <h2 style="text-align:center; color:var(--primary); margin-top:0;">Parts Tracker Pro</h2>
     
     <div class="section">
-        <label>1. API Key</label>
+        <label style="font-size:0.8rem; font-weight:bold;">API Key</label>
         <input type="password" id="api-key" placeholder="Paste Key Here">
     </div>
 
     <div class="section">
-        <label>2. Vision Scan</label>
+        <label style="font-size:0.8rem; font-weight:bold;">Current Page</label>
         <input type="number" id="page-number" value="1">
-        <input type="file" id="camera-input" accept="image/*">
-        <button onclick="processImageAI()">📷 Scan with Gemini 2.5</button>
-        <div id="status-msg" style="color:#e67e22">Ready</div>
+        <label style="font-size:0.8rem; font-weight:bold;">Take/Pick Photo</label>
+        <input type="file" id="camera-input" accept="image/*" capture="environment" onchange="processImageAI()">
+        <div id="status-msg">Ready</div>
     </div>
 
     <div id="display-area"></div>
@@ -45,77 +47,92 @@
     async function processImageAI() {
         const apiKey = apiKeyInput.value;
         const fileInput = document.getElementById('camera-input');
+        const pageInput = document.getElementById('page-number');
         const status = document.getElementById('status-msg');
         
-        if (!apiKey) return alert("Missing API Key!");
-        if (!fileInput.files[0]) return alert("Select an image!");
+        if (!apiKey) return alert("Please enter your API key.");
+        if (!fileInput.files[0]) return;
 
-        status.innerText = "⌛ Scanning with Gemini 2.5 Flash...";
+        status.innerText = "⌛ Scanning Page " + pageInput.value + "...";
         status.style.color = "#e67e22";
-
+        
         const reader = new FileReader();
         reader.onload = async (e) => {
-            const base64Data = e.target.result.split(',')[1];
-            
-            // CHANGED: Using v1 (Stable) and gemini-2.5-flash
-            const url = `https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
-            
             try {
+                const base64Data = e.target.result.split(',')[1];
+                
+                // UPDATED MODEL IDENTIFIER
+                const url = `https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash-lite:generateContent?key=${apiKey}`;
+                
                 const response = await fetch(url, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         contents: [{ parts: [
-                            { text: "Find all part codes in this image. Return ONLY a JSON array: ['CODE1', 'CODE2']." },
+                            { text: "List all alphanumeric part codes in this image as a JSON array. Return ONLY the array." },
                             { inlineData: { mimeType: "image/jpeg", data: base64Data } }
                         ]}]
                     })
                 });
 
                 const data = await response.json();
+                if (data.error) throw new Error(data.error.message);
 
-                if (data.error) {
-                    status.innerText = `❌ Error: ${data.error.message}\n(Try creating a new key at AI Studio)`;
-                    status.style.color = "#d93025";
-                    return;
-                }
+                const textResult = data.candidates[0].content.parts[0].text;
+                const codes = JSON.parse(textResult.match(/\[.*\]/s)[0]);
+                const pageNum = pageInput.value;
 
-                const rawText = data.candidates[0].content.parts[0].text;
-                const codes = JSON.parse(rawText.match(/\[.*\]/s)[0]);
-                const pageNum = document.getElementById('page-number').value || "1";
-                
                 if (!partsData[pageNum]) partsData[pageNum] = [];
-                codes.forEach(c => partsData[pageNum].push({ code: c, used: false }));
-                
+                codes.forEach(c => {
+                    if (!partsData[pageNum].find(i => i.code === c)) {
+                        partsData[pageNum].push({ code: c, used: false });
+                    }
+                });
+
                 localStorage.setItem('parts_tracker_v3', JSON.stringify(partsData));
                 renderData();
-                status.innerText = `✅ Found ${codes.length} codes!`;
+                
+                status.innerText = `✅ Found ${codes.length} items!`;
                 status.style.color = "#1e8e3e";
 
+                // AUTO-INCREMENT & RESET
+                pageInput.value = parseInt(pageNum) + 1;
+                fileInput.value = ""; 
+
             } catch (err) {
-                status.innerText = "❌ Scan failed. Please check the console.";
-                console.error(err);
+                status.innerText = "❌ Model Error: " + err.message + "\nTry creating a NEW key at AI Studio.";
+                status.style.color = "#d93025";
             }
         };
-        reader.readAsDataURL(fileInput.files[0]);
+        reader.readAsAsDataURL(fileInput.files[0]);
+    }
+
+    function togglePart(pageNum, index) {
+        partsData[pageNum][index].used = !partsData[pageNum][index].used;
+        localStorage.setItem('parts_tracker_v3', JSON.stringify(partsData));
+        renderData();
     }
 
     function renderData() {
         const area = document.getElementById('display-area');
         area.innerHTML = "";
-        Object.keys(partsData).sort((a,b) => a-b).forEach(page => {
+        const sortedPages = Object.keys(partsData).sort((a,b) => a-b);
+        
+        sortedPages.forEach(page => {
             const block = document.createElement('div');
             block.className = 'page-block';
             block.innerHTML = `<strong>Page ${page}</strong><br>`;
-            partsData[page].forEach(item => {
+            partsData[page].forEach((item, index) => {
                 const chip = document.createElement('span');
-                chip.className = "part-chip";
+                chip.className = `part-chip ${item.used ? 'used' : ''}`;
                 chip.innerText = item.code;
+                chip.onclick = () => togglePart(page, index);
                 block.appendChild(chip);
             });
             area.appendChild(block);
         });
     }
+
     window.onload = renderData;
 </script>
 </body>
