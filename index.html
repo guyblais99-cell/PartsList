@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Parts Tracker - Projects + Manual</title>
+    <title>Parts Tracker - Sorted</title>
     <style>
         :root { --primary: #1a73e8; --bg: #f1f3f4; --success: #1e8e3e; --danger: #d93025; }
         body { font-family: 'Segoe UI', sans-serif; background: var(--bg); padding: 10px; display: flex; flex-direction: column; align-items: center; }
@@ -90,7 +90,8 @@
     if (oldData && Object.keys(allProjects).length === 0) {
         allProjects["Default Project"] = JSON.parse(oldData);
         localStorage.setItem('parts_tracker_multi_v1', JSON.stringify(allProjects));
-        // We keep the old data key just in case, but rely on new key now
+        // Force immediate sort/save on migration
+        saveAll();
         alert("✅ Restored your previous data into 'Default Project'");
     }
 
@@ -165,7 +166,7 @@
         const currentList = allProjects[currentProjectName][pageNum];
         if (!currentList.find(i => i.code === code)) {
             currentList.push({ code: code, used: false });
-            saveAll();
+            saveAll(); // SaveAll now sorts!
             renderData();
             input.value = ""; // Clear input
             const status = document.getElementById('status-msg');
@@ -298,7 +299,7 @@
                 }
             });
 
-            saveAll();
+            saveAll(); // SaveAll now sorts!
             renderData();
             
             status.innerText = `✅ Found ${count} new items!`;
@@ -322,7 +323,7 @@
         renderData();
     }
 
-    // NEW: Function to delete a whole page
+    // Function to delete a whole page
     function deletePage(page) {
         if(confirm(`Are you sure you want to delete Page ${page}?`)) {
             delete allProjects[currentProjectName][page];
@@ -331,7 +332,18 @@
         }
     }
 
+    // UPDATED SAVE FUNCTION: NOW SORTS ALPHABETICALLY
     function saveAll() {
+        // Iterate through every project and every page to sort them
+        Object.keys(allProjects).forEach(proj => {
+            Object.keys(allProjects[proj]).forEach(page => {
+                // Numeric sort handles "Part 2" before "Part 10" correctly
+                allProjects[proj][page].sort((a, b) => 
+                    a.code.localeCompare(b.code, undefined, { numeric: true, sensitivity: 'base' })
+                );
+            });
+        });
+
         localStorage.setItem('parts_tracker_multi_v1', JSON.stringify(allProjects));
         localStorage.setItem('parts_tracker_last_project', currentProjectName);
     }
@@ -352,7 +364,7 @@
             const block = document.createElement('div');
             block.className = 'page-block';
             
-            // NEW: Header with Page Title and Delete Button
+            // Header with Page Title and Delete Button
             const header = document.createElement('div');
             header.className = 'page-header';
             header.innerHTML = `<h3>Page ${page}</h3> <button class="delete-page-btn" onclick="deletePage('${page}')">Delete Page</button>`;
@@ -362,7 +374,7 @@
                 const chip = document.createElement('span');
                 chip.className = `part-chip ${item.used ? 'used' : ''}`;
                 chip.onclick = () => togglePart(page, index);
-                chip.innerText = item.code; // Clean text, no X
+                chip.innerText = item.code; 
                 block.appendChild(chip);
             });
             area.appendChild(block);
