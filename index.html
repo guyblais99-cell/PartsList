@@ -3,18 +3,35 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Parts Tracker - Auto Detect</title>
+    <title>Parts Tracker Pro - Multi Project</title>
     <style>
-        :root { --primary: #1a73e8; --bg: #f1f3f4; --success: #1e8e3e; }
+        :root { --primary: #1a73e8; --bg: #f1f3f4; --success: #1e8e3e; --danger: #d93025; }
         body { font-family: 'Segoe UI', sans-serif; background: var(--bg); padding: 10px; display: flex; flex-direction: column; align-items: center; }
         .app-container { width: 100%; max-width: 500px; background: white; border-radius: 16px; padding: 20px; box-shadow: 0 4px 20px rgba(0,0,0,0.08); box-sizing: border-box; }
         .section { background: #f8f9fa; border-radius: 12px; padding: 15px; margin-bottom: 15px; border: 1px solid #e0e0e0; }
-        input, button { width: 100%; padding: 12px; margin-bottom: 10px; border-radius: 8px; border: 1px solid #dadce0; box-sizing: border-box; font-size: 1rem; }
-        button { background: var(--primary); color: white; font-weight: bold; border: none; cursor: pointer; }
+        
+        /* Inputs & Buttons */
+        input, button, select { width: 100%; padding: 12px; margin-bottom: 10px; border-radius: 8px; border: 1px solid #dadce0; box-sizing: border-box; font-size: 1rem; }
+        button { background: var(--primary); color: white; font-weight: bold; border: none; cursor: pointer; transition: opacity 0.2s; }
+        button:active { opacity: 0.8; }
+        button.secondary { background: #5f6368; }
+        button.add-btn { width: auto; margin-bottom: 0; flex-grow: 1; }
+        
+        /* Flex Rows */
+        .row { display: flex; gap: 10px; align-items: center; }
+        .row input { margin-bottom: 0; }
+        
+        /* Status & Chips */
         #status-msg { text-align: center; color: #e67e22; font-weight: 500; margin: 10px 0; min-height: 1.2rem; white-space: pre-wrap; }
-        .part-chip { display: inline-block; background: #3c4043; color: white; padding: 10px 16px; border-radius: 20px; margin: 5px; font-family: monospace; cursor: pointer; user-select: none; }
+        .part-chip { display: inline-block; background: #3c4043; color: white; padding: 8px 14px; border-radius: 20px; margin: 4px; font-family: monospace; cursor: pointer; user-select: none; font-size: 0.9rem; position: relative; }
         .part-chip.used { background: var(--success) !important; text-decoration: line-through; opacity: 0.8; }
+        
+        /* Delete "X" on chips */
+        .part-chip .delete-x { margin-left: 8px; font-weight: bold; color: #ff8a80; display: none; }
+        .part-chip:hover .delete-x { display: inline; }
+
         .page-block { border: 1px solid #dadce0; border-radius: 8px; margin-bottom: 12px; background: white; padding: 10px; width:100%; box-sizing: border-box;}
+        h3 { margin: 0 0 10px 0; font-size: 1rem; color: #5f6368; }
     </style>
 </head>
 <body>
@@ -23,189 +40,305 @@
     <h2 style="text-align:center; color:var(--primary); margin-top:0;">Parts Tracker Pro</h2>
     
     <div class="section">
-        <label style="font-size:0.8rem; font-weight:bold;">API Key</label>
-        <input type="password" id="api-key" placeholder="Paste Key Here">
+        <label style="font-size:0.8rem; font-weight:bold;">Current Project</label>
+        <div class="row">
+            <select id="project-select" onchange="switchProject()"></select>
+            <button onclick="createNewProject()" style="width: 50px; font-size: 1.2rem;">+</button>
+        </div>
+        <input type="password" id="api-key" placeholder="API Key (Saved automatically)" style="margin-top:10px;">
     </div>
 
     <div class="section">
-        <label style="font-size:0.8rem; font-weight:bold;">Current Page</label>
-        <input type="number" id="page-number" value="1">
-        <label style="font-size:0.8rem; font-weight:bold;">Take/Pick Photo</label>
-        <input type="file" id="camera-input" accept="image/*" capture="environment" onchange="processImageAI()">
+        <div class="row" style="margin-bottom:10px;">
+            <div style="flex:1">
+                <label style="font-size:0.8rem; font-weight:bold;">Page #</label>
+                <input type="number" id="page-number" value="1">
+            </div>
+            <div style="flex:2">
+                 <label style="font-size:0.8rem; font-weight:bold;">AI Scan</label>
+                 <label for="camera-input" style="display:block; background:var(--primary); color:white; text-align:center; padding:12px; border-radius:8px; cursor:pointer; font-weight:bold;">
+                    📷 Camera
+                 </label>
+                 <input type="file" id="camera-input" accept="image/*" capture="environment" onchange="processImageAI()" style="display:none;">
+            </div>
+        </div>
+
         <div id="status-msg">Ready</div>
+
+        <div style="border-top:1px solid #e0e0e0; padding-top:10px; margin-top:10px;">
+            <label style="font-size:0.8rem; font-weight:bold;">Manual Entry (Missed Parts)</label>
+            <div class="row">
+                <input type="text" id="manual-input" placeholder="e.g., X-99" onkeydown="if(event.key==='Enter') manualAdd()">
+                <button class="add-btn" onclick="manualAdd()">Add</button>
+            </div>
+        </div>
     </div>
 
     <div id="display-area"></div>
+    
+    <div style="text-align:center; margin-top:10px;">
+        <button class="secondary" onclick="deleteProject()" style="background:#e0e0e0; color:#333; font-size:0.8rem; padding:8px;">🗑 Delete This Project</button>
+    </div>
 </div>
 
 <script>
-    let partsData = JSON.parse(localStorage.getItem('parts_tracker_v3')) || {};
+    // --- DATA MANAGEMENT ---
+    let allProjects = JSON.parse(localStorage.getItem('parts_tracker_multi_v1')) || {};
+    let currentProjectName = localStorage.getItem('parts_tracker_last_project') || "Default Project";
+
+    // MIGRATION: If user has old v3 data but no multi-project data, move it.
+    const oldData = localStorage.getItem('parts_tracker_v3');
+    if (oldData && Object.keys(allProjects).length === 0) {
+        allProjects["Default Project"] = JSON.parse(oldData);
+        localStorage.setItem('parts_tracker_multi_v1', JSON.stringify(allProjects));
+        localStorage.removeItem('parts_tracker_v3'); // Cleanup
+        alert("✅ Your previous data was moved to 'Default Project'");
+    }
+
+    // Ensure at least one project exists
+    if (!allProjects[currentProjectName]) {
+        allProjects[currentProjectName] = {}; 
+    }
+
     const apiKeyInput = document.getElementById('api-key');
     apiKeyInput.value = localStorage.getItem('parts_tracker_api_key') || "";
     apiKeyInput.addEventListener('input', () => localStorage.setItem('parts_tracker_api_key', apiKeyInput.value));
 
-    // 1. COMPRESSION UTILITY
+    // --- PROJECT UI LOGIC ---
+    function renderProjectSelect() {
+        const select = document.getElementById('project-select');
+        select.innerHTML = "";
+        Object.keys(allProjects).forEach(name => {
+            const opt = document.createElement('option');
+            opt.value = name;
+            opt.innerText = name;
+            if (name === currentProjectName) opt.selected = true;
+            select.appendChild(opt);
+        });
+    }
+
+    function switchProject() {
+        currentProjectName = document.getElementById('project-select').value;
+        localStorage.setItem('parts_tracker_last_project', currentProjectName);
+        renderData();
+    }
+
+    function createNewProject() {
+        const name = prompt("Enter new project name:");
+        if (name && !allProjects[name]) {
+            allProjects[name] = {};
+            currentProjectName = name;
+            saveAll();
+            renderProjectSelect();
+            renderData();
+        } else if (allProjects[name]) {
+            alert("Project already exists!");
+        }
+    }
+
+    function deleteProject() {
+        if(confirm(`Are you sure you want to delete '${currentProjectName}'? This cannot be undone.`)) {
+            delete allProjects[currentProjectName];
+            const keys = Object.keys(allProjects);
+            if (keys.length > 0) currentProjectName = keys[0];
+            else { currentProjectName = "Default Project"; allProjects[currentProjectName] = {}; }
+            
+            saveAll();
+            renderProjectSelect();
+            renderData();
+        }
+    }
+
+    // --- MANUAL ENTRY ---
+    function manualAdd() {
+        const input = document.getElementById('manual-input');
+        const code = input.value.trim();
+        const pageNum = document.getElementById('page-number').value;
+        
+        if (!code) return;
+
+        // Initialize page array if needed
+        if (!allProjects[currentProjectName][pageNum]) {
+            allProjects[currentProjectName][pageNum] = [];
+        }
+
+        // Add if unique
+        const currentList = allProjects[currentProjectName][pageNum];
+        if (!currentList.find(i => i.code === code)) {
+            currentList.push({ code: code, used: false });
+            saveAll();
+            renderData();
+            input.value = ""; // Clear input
+            // Visual feedback
+            const status = document.getElementById('status-msg');
+            status.innerText = `Added "${code}" manually`;
+            status.style.color = "#1e8e3e";
+        } else {
+            alert("Part already exists on this page.");
+        }
+    }
+
+    // --- AI LOGIC (Auto-Detect + Compression) ---
     function compressImage(file) {
         return new Promise((resolve) => {
             const reader = new FileReader();
             reader.readAsDataURL(file);
-            reader.onload = (event) => {
+            reader.onload = (e) => {
                 const img = new Image();
-                img.src = event.target.result;
+                img.src = e.target.result;
                 img.onload = () => {
                     const canvas = document.createElement('canvas');
-                    const MAX_WIDTH = 1600; 
-                    const scale = MAX_WIDTH / img.width;
-                    if (img.width > MAX_WIDTH) {
-                        canvas.width = MAX_WIDTH;
-                        canvas.height = img.height * scale;
-                    } else {
-                        canvas.width = img.width;
-                        canvas.height = img.height;
-                    }
+                    const MAX = 1600;
+                    const scale = MAX / img.width;
+                    if (img.width > MAX) { canvas.width = MAX; canvas.height = img.height * scale; }
+                    else { canvas.width = img.width; canvas.height = img.height; }
+                    
                     const ctx = canvas.getContext('2d');
                     ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-                    const dataUrl = canvas.toDataURL('image/jpeg', 0.8); 
-                    resolve(dataUrl.split(',')[1]);
+                    resolve(canvas.toDataURL('image/jpeg', 0.8).split(',')[1]);
                 };
             };
         });
     }
 
-    // 2. AUTO-DETECT MODEL FUNCTION
-    async function findBestModel(apiKey) {
-        // List all models available to this key
-        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`);
-        const data = await response.json();
-        
-        if (data.error) throw new Error(data.error.message);
-        if (!data.models) throw new Error("No models found for this API key.");
-
-        // Look for Flash 1.5 first (Best for free tier), then others
-        const models = data.models.map(m => m.name);
-        
-        // Priority List
-        const preferred = [
-            'models/gemini-1.5-flash',
-            'models/gemini-1.5-flash-latest',
-            'models/gemini-1.5-flash-001',
-            'models/gemini-1.5-flash-002',
-            'models/gemini-1.0-pro',
-            'models/gemini-pro'
-        ];
-
-        // Find the first match
-        for (let p of preferred) {
-            if (models.includes(p)) return p;
-        }
-
-        // Fallback: take ANY model that supports generateContent
-        const fallback = data.models.find(m => m.supportedGenerationMethods && m.supportedGenerationMethods.includes("generateContent"));
-        if (fallback) return fallback.name;
-
-        throw new Error("No compatible vision models found.");
+    async function findBestModel(key) {
+        try {
+            const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${key}`);
+            const d = await r.json();
+            if(!d.models) return 'models/gemini-1.5-flash'; // Fallback
+            
+            const list = d.models.map(m => m.name);
+            const preferred = [
+                'models/gemini-1.5-flash', 'models/gemini-1.5-flash-latest',
+                'models/gemini-2.0-flash-exp', 'models/gemini-pro'
+            ];
+            for(let p of preferred) if(list.includes(p)) return p;
+            return list.find(m => m.includes('gemini')) || 'models/gemini-1.5-flash';
+        } catch(e) { return 'models/gemini-1.5-flash'; }
     }
 
-    // 3. MAIN PROCESS
     async function processImageAI() {
-        const rawKey = apiKeyInput.value;
-        const apiKey = rawKey ? rawKey.trim() : "";
+        const apiKey = apiKeyInput.value.trim();
+        if (!apiKey) return alert("Please enter API Key");
+        
         const fileInput = document.getElementById('camera-input');
-        const pageInput = document.getElementById('page-number');
         const status = document.getElementById('status-msg');
         
-        if (!apiKey) return alert("Please enter your API key.");
         if (!fileInput.files[0]) return;
 
-        status.innerText = "🔍 Finding best model...";
+        status.innerText = "🔍 Scanning...";
         status.style.color = "#e67e22";
-        
+
         try {
-            // Step A: Compress
-            const base64Data = await compressImage(fileInput.files[0]);
-
-            // Step B: Auto-Detect Model
-            const modelName = await findBestModel(apiKey);
-            status.innerText = `🚀 Using ${modelName.replace('models/', '')}...`;
-
-            // Step C: Send Request
-            const url = `https://generativelanguage.googleapis.com/v1beta/${modelName}:generateContent?key=${apiKey}`;
+            const base64 = await compressImage(fileInput.files[0]);
+            const model = await findBestModel(apiKey);
             
-            const response = await fetch(url, {
+            const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/${model}:generateContent?key=${apiKey}`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({
                     contents: [{ parts: [
                         { text: "List all part numbers in this image as a JSON array. Return ONLY the array." },
-                        { inlineData: { mimeType: "image/jpeg", data: base64Data } }
+                        { inlineData: { mimeType: "image/jpeg", data: base64 } }
                     ]}]
                 })
             });
 
-            const data = await response.json();
+            const data = await res.json();
+            if (data.error) throw new Error(data.error.message);
 
-            if (data.error) {
-                if (data.error.code === 429) throw new Error("Rate limit hit. Please wait 60s.");
-                throw new Error(data.error.message);
-            }
-
-            // Step D: Parse
-            const textResult = data.candidates[0].content.parts[0].text;
-            const cleanText = textResult.replace(/```json|```/g, ''); 
-            const codes = JSON.parse(cleanText.match(/\[.*\]/s)[0]);
+            const text = data.candidates[0].content.parts[0].text.replace(/```json|```/g, '');
+            const codes = JSON.parse(text.match(/\[.*\]/s)[0]);
             
-            const pageNum = pageInput.value;
-
-            if (!partsData[pageNum]) partsData[pageNum] = [];
+            const pageNum = document.getElementById('page-number').value;
+            if (!allProjects[currentProjectName][pageNum]) allProjects[currentProjectName][pageNum] = [];
+            
+            let addedCount = 0;
             codes.forEach(c => {
-                if (!partsData[pageNum].find(i => i.code === c)) {
-                    partsData[pageNum].push({ code: c, used: false });
+                if (!allProjects[currentProjectName][pageNum].find(i => i.code === c)) {
+                    allProjects[currentProjectName][pageNum].push({ code: c, used: false });
+                    addedCount++;
                 }
             });
 
-            localStorage.setItem('parts_tracker_v3', JSON.stringify(partsData));
+            saveAll();
             renderData();
             
-            status.innerText = `✅ Found ${codes.length} items!`;
+            status.innerText = `✅ Added ${addedCount} items!`;
             status.style.color = "#1e8e3e";
+            
+            // Auto-increment page
+            document.getElementById('page-number').value = parseInt(pageNum) + 1;
+            fileInput.value = "";
 
-            pageInput.value = parseInt(pageNum) + 1;
-            fileInput.value = ""; 
-
-        } catch (err) {
-            console.error(err);
-            status.innerText = "❌ " + err.message;
+        } catch (e) {
+            status.innerText = "❌ " + e.message;
             status.style.color = "#d93025";
         }
     }
 
+    // --- SHARED UTILS ---
     function togglePart(pageNum, index) {
-        partsData[pageNum][index].used = !partsData[pageNum][index].used;
-        localStorage.setItem('parts_tracker_v3', JSON.stringify(partsData));
+        const item = allProjects[currentProjectName][pageNum][index];
+        item.used = !item.used;
+        saveAll();
         renderData();
+    }
+
+    // Long press or double click to delete specific part? 
+    // For now, I added a hidden 'X' that appears on hover/tap
+    function deletePart(e, pageNum, index) {
+        e.stopPropagation(); // Stop it from toggling
+        if(confirm("Delete this part?")) {
+            allProjects[currentProjectName][pageNum].splice(index, 1);
+            // If page empty, delete page key? Optional.
+            if(allProjects[currentProjectName][pageNum].length === 0) {
+                delete allProjects[currentProjectName][pageNum];
+            }
+            saveAll();
+            renderData();
+        }
+    }
+
+    function saveAll() {
+        localStorage.setItem('parts_tracker_multi_v1', JSON.stringify(allProjects));
+        localStorage.setItem('parts_tracker_last_project', currentProjectName);
     }
 
     function renderData() {
         const area = document.getElementById('display-area');
         area.innerHTML = "";
-        const sortedPages = Object.keys(partsData).sort((a,b) => a-b);
         
+        const projectData = allProjects[currentProjectName] || {};
+        const sortedPages = Object.keys(projectData).sort((a,b) => a-b);
+        
+        if (sortedPages.length === 0) {
+            area.innerHTML = "<div style='text-align:center; color:#999; margin-top:20px;'>No parts yet.<br>Scan a photo or add manually.</div>";
+            return;
+        }
+
         sortedPages.forEach(page => {
             const block = document.createElement('div');
             block.className = 'page-block';
-            block.innerHTML = `<strong>Page ${page}</strong><br>`;
-            partsData[page].forEach((item, index) => {
+            block.innerHTML = `<h3>Page ${page}</h3>`;
+            
+            projectData[page].forEach((item, index) => {
                 const chip = document.createElement('span');
                 chip.className = `part-chip ${item.used ? 'used' : ''}`;
-                chip.innerText = item.code;
                 chip.onclick = () => togglePart(page, index);
+                
+                // Content
+                chip.innerHTML = `${item.code} <span class="delete-x" onclick="deletePart(event, '${page}', ${index})">×</span>`;
+                
                 block.appendChild(chip);
             });
             area.appendChild(block);
         });
     }
 
-    window.onload = renderData;
+    // Initialize
+    renderProjectSelect();
+    renderData();
 </script>
 </body>
 </html>
